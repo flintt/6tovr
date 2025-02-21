@@ -1,0 +1,180 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+  <meta charset="UTF-8">
+  <title>VR全景照片生成器 (自动识别贴图方向)</title>
+  <style>
+    body { margin: 0; overflow: hidden; }
+    #drop-zone {
+      position: absolute;
+      top: 10px;
+      left: 10px;
+      width: 640px;
+      height: 30px;
+      border: 2px dashed #ccc;
+      background: rgba(255,255,255,0.8);
+      z-index: 100;
+      text-align: center;
+      line-height: 30px;
+      font-size: 16px;
+      color: #333;
+    }
+  </style>
+</head>
+<body>
+  <div id="drop-zone">
+    拖拽6张图片到这里
+    (文件名包含 _r, _l, _u, _d, _f, _b 分别代表右、左、上、下、前、后)
+  </div>
+  
+  <!-- 引入 Three.js 和 OrbitControls -->
+  <script src="./three.min.js"></script>
+  <script src="./OrbitControls.js"></script>
+  
+  <script>
+    let scene, camera, renderer, controls;
+    initScene();
+    
+    function initScene() {
+      scene = new THREE.Scene();
+      camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
+      renderer = new THREE.WebGLRenderer({ antialias: true });
+      renderer.setSize(window.innerWidth, window.innerHeight);
+      // 设置 canvas 样式，确保不会遮挡拖拽区域
+      renderer.domElement.style.position = 'absolute';
+      renderer.domElement.style.top = '0';
+      renderer.domElement.style.left = '0';
+      renderer.domElement.style.zIndex = '1';
+      // 可设置背景色（如白色）
+      renderer.setClearColor(0xffffff);
+      document.body.appendChild(renderer.domElement);
+      
+      controls = new THREE.OrbitControls(camera, renderer.domElement);
+      controls.enableZoom = false;
+      controls.enablePan = false;
+      camera.position.set(0.1, 0, 0);
+	  controls.target.set(0, 0, 0);
+	  controls.update();
+
+      
+      // 交互时渲染
+      controls.addEventListener('change', () => {
+        renderer.render(scene, camera);
+      });
+      
+      // 初始渲染一次
+      renderer.render(scene, camera);
+    }
+    
+    // 拖拽区域事件处理
+    const dropZone = document.getElementById('drop-zone');
+    
+    dropZone.addEventListener('dragenter', function(e) {
+      e.preventDefault();
+      dropZone.style.background = 'rgba(200,200,200,0.8)';
+    });
+    dropZone.addEventListener('dragover', function(e) {
+      e.preventDefault();
+      dropZone.style.background = 'rgba(200,200,200,0.8)';
+    });
+    dropZone.addEventListener('dragleave', function(e) {
+      e.preventDefault();
+      dropZone.style.background = 'rgba(255,255,255,0.8)';
+    });
+    
+    dropZone.addEventListener('drop', function(e) {
+      e.preventDefault();
+      dropZone.style.background = 'rgba(255,255,255,0.8)';
+      
+      const files = Array.from(e.dataTransfer.files);
+      if (files.length !== 6) {
+        alert('请确保拖拽6张图片！');
+        return;
+      }
+      
+      // 按照文件名中的关键字符来映射各个面
+      // 映射规则：r:右(0)、l:左(1)、u:上(2)、d:下(3)、f:前(4)、b:后(5)
+      const directionMapping = {
+        _r: 0,
+        _l: 1,
+        _u: 2,
+        _d: 3,
+        _f: 4,
+        _b: 5
+      };
+      
+      const textures = new Array(6);
+      let loadedCount = 0;
+      
+      files.forEach(file => {
+        const lowerName = file.name.toLowerCase();
+        let assignedIndex = null;
+        // 检查文件名是否包含特定字符
+        for (const key in directionMapping) {
+          // 可以采用更精确的匹配方式，如查找 "_r", "_l" 等
+          if (lowerName.indexOf(key) !== -1) {
+            assignedIndex = directionMapping[key];
+            break;
+          }
+        }
+        
+        if (assignedIndex === null) {
+          console.warn('无法判断方向，文件名不包含预期字符：', file.name);
+          return;
+        }
+        
+        const reader = new FileReader();
+        reader.onload = function(event) {
+          const img = new Image();
+          img.onload = function() {
+            const texture = new THREE.Texture(img);
+            texture.needsUpdate = true;
+            textures[assignedIndex] = texture;
+            loadedCount++;
+            if (loadedCount === 6) {
+              createPanoramaCube(textures);
+              renderer.render(scene, camera);
+            }
+          };
+          img.src = event.target.result;
+        };
+        reader.readAsDataURL(file);
+      });
+    });
+    
+    // 创建全景立方体，将纹理映射到内侧
+    function createPanoramaCube(textures) {
+      // 如果已经存在全景立方体，先移除
+      const existingCube = scene.getObjectByName('panoramaCube');
+      if (existingCube) {
+        scene.remove(existingCube);
+      }
+      
+      const geometry = new THREE.BoxGeometry(500, 500, 500);
+      // 翻转几何体，使贴图显示在内侧
+      geometry.scale(-1, 1, 1);
+      
+      const materials = [
+        new THREE.MeshBasicMaterial({ map: textures[0] }), // 右
+        new THREE.MeshBasicMaterial({ map: textures[1] }), // 左
+        new THREE.MeshBasicMaterial({ map: textures[2] }), // 上
+        new THREE.MeshBasicMaterial({ map: textures[3] }), // 下
+        new THREE.MeshBasicMaterial({ map: textures[4] }), // 前
+        new THREE.MeshBasicMaterial({ map: textures[5] })  // 后
+      ];
+      
+      const cube = new THREE.Mesh(geometry, materials);
+      cube.name = 'panoramaCube';
+      scene.add(cube);
+    }
+    
+    // 当窗口尺寸变化时，更新相机与渲染器
+    window.addEventListener('resize', function() {
+      camera.aspect = window.innerWidth / window.innerHeight;
+      camera.updateProjectionMatrix();
+      renderer.setSize(window.innerWidth, window.innerHeight);
+      renderer.render(scene, camera);
+    });
+  </script>
+</body>
+</html>
