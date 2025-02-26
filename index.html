@@ -2,7 +2,7 @@
 <html lang="zh">
 <head>
   <meta charset="UTF-8">
-  <title>VR全景照片生成器 (自动识别贴图方向)</title>
+  <title>VR全景照片生成器 (自动识别贴图方向, 含缩放功能)</title>
   <style>
     body { margin: 0; overflow: hidden; }
     #drop-zone {
@@ -49,20 +49,39 @@
       renderer.setClearColor(0xffffff);
       document.body.appendChild(renderer.domElement);
       
+      // 初始化 OrbitControls（关闭默认缩放）
       controls = new THREE.OrbitControls(camera, renderer.domElement);
-      controls.enableZoom = false;
+      controls.enableZoom = false; // 我们将通过鼠标滚轮修改 fov 实现缩放
       controls.enablePan = false;
-      camera.position.set(0.1, 0, 0);
-	  controls.target.set(0, 0, 0);
-	  controls.update();
-
       
+      // 设置相机放置在立方体内部时比较合适的 fov 效果
+      camera.position.set(0.1, 0, 0);
+      controls.target.set(0, 0, 0);
+      controls.update();
+
       // 交互时渲染
       controls.addEventListener('change', () => {
         renderer.render(scene, camera);
       });
       
-      // 初始渲染一次
+      // 监听鼠标滚轮，修改 fov 实现缩放效果
+      // 定义一个基准旋转速度和初始 fov
+      const baseRotateSpeed = 1.0;
+      const initialFov = 75;
+      
+      renderer.domElement.addEventListener('wheel', function(e) {
+        e.preventDefault();
+        // 根据滚轮增量调整 fov
+        camera.fov += e.deltaY * 0.05;
+        // 限制 fov 范围
+        camera.fov = Math.max(10, Math.min(initialFov, camera.fov));
+        camera.updateProjectionMatrix();
+        
+        // 根据 fov 比例调整旋转速度
+        controls.rotateSpeed = baseRotateSpeed * (camera.fov / initialFov);
+        controls.update();
+        renderer.render(scene, camera);
+      });
       renderer.render(scene, camera);
     }
     
@@ -93,7 +112,7 @@
       }
       
       // 按照文件名中的关键字符来映射各个面
-      // 映射规则：r:右(0)、l:左(1)、u:上(2)、d:下(3)、f:前(4)、b:后(5)
+      // 映射规则：_r:右(0)、_l:左(1)、_u:上(2)、_d:下(3)、_f:前(4)、_b:后(5)
       const directionMapping = {
         _r: 0,
         _l: 1,
