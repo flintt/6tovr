@@ -2,14 +2,14 @@
 <html lang="zh">
 <head>
   <meta charset="UTF-8">
-  <title>VR全景照片生成器 (自动识别贴图方向, 含缩放功能)</title>
+  <title>VR全景照片生成器 (自动识别贴图方向, 含缩放功能和点击上传)</title>
   <style>
     body { margin: 0; overflow: hidden; }
     #drop-zone {
       position: absolute;
       top: 10px;
       left: 10px;
-      width: 640px;
+      width: 700px;
       height: 30px;
       border: 2px dashed #ccc;
       background: rgba(255,255,255,0.8);
@@ -18,13 +18,19 @@
       line-height: 30px;
       font-size: 16px;
       color: #333;
+      cursor: pointer;
+    }
+    /* 隐藏 file input */
+    #file-input {
+      display: none;
     }
   </style>
 </head>
 <body>
   <div id="drop-zone">
-    拖拽6张图片到这里
+    拖拽或点击上传6张图片
     (文件名包含 _r, _l, _u, _d, _f, _b 分别代表右、左、上、下、前、后)
+    <input type="file" id="file-input" multiple accept="image/*">
   </div>
   
   <!-- 引入 Three.js 和 OrbitControls -->
@@ -37,57 +43,59 @@
     
     function initScene() {
       scene = new THREE.Scene();
-      camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
+      camera = new THREE.PerspectiveCamera(75, window.innerWidth/window.innerHeight, 0.1, 1000);
       renderer = new THREE.WebGLRenderer({ antialias: true });
       renderer.setSize(window.innerWidth, window.innerHeight);
-      // 设置 canvas 样式，确保不会遮挡拖拽区域
       renderer.domElement.style.position = 'absolute';
       renderer.domElement.style.top = '0';
       renderer.domElement.style.left = '0';
       renderer.domElement.style.zIndex = '1';
-      // 可设置背景色（如白色）
       renderer.setClearColor(0xffffff);
       document.body.appendChild(renderer.domElement);
       
-      // 初始化 OrbitControls（关闭默认缩放）
+      // 初始化 OrbitControls（关闭默认缩放，通过修改 fov 实现缩放）
       controls = new THREE.OrbitControls(camera, renderer.domElement);
-      controls.enableZoom = false; // 我们将通过鼠标滚轮修改 fov 实现缩放
+      controls.enableZoom = false;
       controls.enablePan = false;
-      
-      // 设置相机放置在立方体内部时比较合适的 fov 效果
       camera.position.set(0.1, 0, 0);
       controls.target.set(0, 0, 0);
       controls.update();
-
-      // 交互时渲染
+      
       controls.addEventListener('change', () => {
         renderer.render(scene, camera);
       });
       
-      // 监听鼠标滚轮，修改 fov 实现缩放效果
-      // 定义一个基准旋转速度和初始 fov
+      // 监听鼠标滚轮，根据 fov 实现缩放，同时调整旋转速度
       const baseRotateSpeed = 1.0;
       const initialFov = 75;
-      
       renderer.domElement.addEventListener('wheel', function(e) {
         e.preventDefault();
-        // 根据滚轮增量调整 fov
         camera.fov += e.deltaY * 0.05;
-        // 限制 fov 范围
         camera.fov = Math.max(10, Math.min(initialFov, camera.fov));
         camera.updateProjectionMatrix();
-        
-        // 根据 fov 比例调整旋转速度
         controls.rotateSpeed = baseRotateSpeed * (camera.fov / initialFov);
         controls.update();
         renderer.render(scene, camera);
       });
+      
       renderer.render(scene, camera);
     }
     
-    // 拖拽区域事件处理
+    // 拖拽区域和点击上传处理
     const dropZone = document.getElementById('drop-zone');
+    const fileInput = document.getElementById('file-input');
     
+    // 点击上传：点击区域触发文件选择对话框
+    dropZone.addEventListener('click', function() {
+      fileInput.click();
+    });
+    
+    // 文件选择后处理文件
+    fileInput.addEventListener('change', function(event) {
+      handleFiles(event.target.files);
+    });
+    
+    // 拖拽相关事件处理
     dropZone.addEventListener('dragenter', function(e) {
       e.preventDefault();
       dropZone.style.background = 'rgba(200,200,200,0.8)';
@@ -100,18 +108,20 @@
       e.preventDefault();
       dropZone.style.background = 'rgba(255,255,255,0.8)';
     });
-    
     dropZone.addEventListener('drop', function(e) {
       e.preventDefault();
       dropZone.style.background = 'rgba(255,255,255,0.8)';
-      
-      const files = Array.from(e.dataTransfer.files);
+      handleFiles(e.dataTransfer.files);
+    });
+    
+    // 统一处理拖拽或点击上传的文件
+    function handleFiles(fileList) {
+      const files = Array.from(fileList);
       if (files.length !== 6) {
-        alert('请确保拖拽6张图片！');
+        alert('请确保选择6张图片！');
         return;
       }
       
-      // 按照文件名中的关键字符来映射各个面
       // 映射规则：_r:右(0)、_l:左(1)、_u:上(2)、_d:下(3)、_f:前(4)、_b:后(5)
       const directionMapping = {
         _r: 0,
@@ -128,20 +138,16 @@
       files.forEach(file => {
         const lowerName = file.name.toLowerCase();
         let assignedIndex = null;
-        // 检查文件名是否包含特定字符
         for (const key in directionMapping) {
-          // 可以采用更精确的匹配方式，如查找 "_r", "_l" 等
           if (lowerName.indexOf(key) !== -1) {
             assignedIndex = directionMapping[key];
             break;
           }
         }
-        
         if (assignedIndex === null) {
           console.warn('无法判断方向，文件名不包含预期字符：', file.name);
           return;
         }
-        
         const reader = new FileReader();
         reader.onload = function(event) {
           const img = new Image();
@@ -159,18 +165,16 @@
         };
         reader.readAsDataURL(file);
       });
-    });
+    }
     
     // 创建全景立方体，将纹理映射到内侧
     function createPanoramaCube(textures) {
-      // 如果已经存在全景立方体，先移除
       const existingCube = scene.getObjectByName('panoramaCube');
       if (existingCube) {
         scene.remove(existingCube);
       }
       
       const geometry = new THREE.BoxGeometry(500, 500, 500);
-      // 翻转几何体，使贴图显示在内侧
       geometry.scale(-1, 1, 1);
       
       const materials = [
@@ -187,7 +191,6 @@
       scene.add(cube);
     }
     
-    // 当窗口尺寸变化时，更新相机与渲染器
     window.addEventListener('resize', function() {
       camera.aspect = window.innerWidth / window.innerHeight;
       camera.updateProjectionMatrix();
