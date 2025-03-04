@@ -78,65 +78,56 @@
         renderer.render(scene, camera);
       });
       
-// 定义变量用于记录捏合的初始距离
-let initialPinchDistance = null;
+		let initialPinchDistance = null;
+		const baseRotateSpeed = 1.0;
+		const initialFov = 75;
 
-// 触摸开始事件
-renderer.domElement.addEventListener('touchstart', function(e) {
-  if (e.touches.length === 2) {
-    // 记录两个触摸点之间的初始距离
-    initialPinchDistance = getDistance(e.touches[0], e.touches[1]);
-  }
-}, { passive: false });
+		// 触摸开始：如果至少有两个触摸点，使用前两个计算初始距离
+		renderer.domElement.addEventListener('touchstart', function(e) {
+		  if (e.touches.length >= 2) {
+			initialPinchDistance = getDistance(e.touches[0], e.touches[1]);
+		  }
+		}, { passive: false });
 
-// 触摸移动事件
-renderer.domElement.addEventListener('touchmove', function(e) {
-  if (e.touches.length === 2 && initialPinchDistance !== null) {
-    // 计算当前两个触摸点的距离
-    const currentDistance = getDistance(e.touches[0], e.touches[1]);
-    const delta = currentDistance - initialPinchDistance;
-    
-    // 根据距离变化调整 fov，缩放速度可根据实际需求调节（这里取 0.05 为因子）
-    camera.fov -= delta * 0.05;
-    // 限制 fov 的范围（10 到 initialFov 之间）
-    const initialFov = 75;
-    camera.fov = Math.max(10, Math.min(initialFov, camera.fov));
-    camera.updateProjectionMatrix();
-    
-    // 同时根据 fov 比例调整 controls.rotateSpeed
-    const baseRotateSpeed = 1.0;
-    controls.rotateSpeed = baseRotateSpeed * (camera.fov / initialFov);
-    controls.update();
-    renderer.render(scene, camera);
-    
-    // 更新初始距离为当前距离，以便连续计算
-    initialPinchDistance = currentDistance;
-    
-    // 阻止默认手势（防止页面滚动或缩放）
-    e.preventDefault();
-  }
-}, { passive: false });
+		// 触摸移动：始终使用 touches[0] 和 touches[1]
+		renderer.domElement.addEventListener('touchmove', function(e) {
+		  if (e.touches.length >= 2 && initialPinchDistance !== null) {
+			const currentDistance = getDistance(e.touches[0], e.touches[1]);
+			const delta = currentDistance - initialPinchDistance;
+			
+			camera.fov -= delta * 0.05;
+			camera.fov = Math.max(10, Math.min(initialFov, camera.fov));
+			camera.updateProjectionMatrix();
+			
+			controls.rotateSpeed = baseRotateSpeed * (camera.fov / initialFov);
+			controls.update();
+			renderer.render(scene, camera);
+			
+			// 更新初始距离，保持连续计算
+			initialPinchDistance = currentDistance;
+			e.preventDefault();
+		  }
+		}, { passive: false });
 
-// 当触摸结束或取消时，重置捏合距离
-renderer.domElement.addEventListener('touchend', function(e) {
-  if (e.touches.length < 2) {
-    initialPinchDistance = null;
-  }
-});
-renderer.domElement.addEventListener('touchcancel', function(e) {
-  initialPinchDistance = null;
-});
+		// 触摸结束或取消：当手指数量不足2时，重置初始距离
+		renderer.domElement.addEventListener('touchend', function(e) {
+		  if (e.touches.length < 2) {
+			initialPinchDistance = null;
+		  } else {
+			// 如果还有至少两个触摸点，重新计算一次初始距离
+			initialPinchDistance = getDistance(e.touches[0], e.touches[1]);
+		  }
+		}, { passive: false });
+		renderer.domElement.addEventListener('touchcancel', function(e) {
+		  initialPinchDistance = null;
+		}, { passive: false });
 
-// 辅助函数：计算两点之间的距离
-function getDistance(touch1, touch2) {
-  const dx = touch1.pageX - touch2.pageX;
-  const dy = touch1.pageY - touch2.pageY;
-  return Math.sqrt(dx * dx + dy * dy);
-}
-
-	  
-	  
-	  
+		// 辅助函数：计算两个触摸点之间的距离
+		function getDistance(touch1, touch2) {
+		  const dx = touch1.pageX - touch2.pageX;
+		  const dy = touch1.pageY - touch2.pageY;
+		  return Math.sqrt(dx * dx + dy * dy);
+		}
       renderer.render(scene, camera);
     }
     
