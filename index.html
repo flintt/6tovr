@@ -111,9 +111,6 @@
 		renderer.domElement.addEventListener('touchend', function(e) {
 		  if (e.touches.length < 2) {
 			initialPinchDistance = null;
-		  } else {
-			// 如果还有至少两个触摸点，重新计算一次初始距离
-			initialPinchDistance = getDistance(e.touches[0], e.touches[1]);
 		  }
 		}, { passive: false });
 		renderer.domElement.addEventListener('touchcancel', function(e) {
