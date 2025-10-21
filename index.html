@@ -110,7 +110,7 @@
 
 		// 触摸结束或取消：当手指数量不足2时，重置初始距离
 		renderer.domElement.addEventListener('touchend', function(e) {
-		  if (e.touches.length < 2) {
+		  if (e.touches.length === 0) {
 			initialPinchDistance = null;
 			controls.enabled = true; // 启用 OrbitControls
 		  }
