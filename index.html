@@ -4,34 +4,84 @@
   <meta charset="UTF-8">
   <title>VR全景照片生成器 (自动识别贴图方向, 含缩放功能和点击上传)</title>
   <style>
-    body { margin: 0; overflow: hidden; }
+    body {
+      margin: 0;
+      overflow: hidden;
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+    }
     #drop-zone {
       position: absolute;
-      top: 10px;
-      left: 10px;
-      width: 740px;
-      height: 30px;
-      border: 2px dashed #ccc;
-      background: rgba(255,255,255,0.8);
+      top: 50%;
+      left: 50%;
+      transform: translate(-50%, -50%);
+      width: 90%;
+      max-width: 500px;
+      padding: 40px 20px;
+      border: 2px dashed #007aff;
+      border-radius: 15px;
+      background: rgba(255, 255, 255, 0.9);
+      box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
       z-index: 100;
       text-align: center;
-      line-height: 30px;
-      font-size: 16px;
+      font-size: 18px;
       color: #333;
       cursor: pointer;
+      transition: background-color 0.2s ease, transform 0.2s ease;
+    }
+    #drop-zone:hover {
+      background: rgba(248, 248, 252, 0.95);
+      transform: translate(-50%, -50%) scale(1.02);
+    }
+    #loader {
+      display: none;
+      position: absolute;
+      top: 50%;
+      left: 50%;
+      transform: translate(-50%, -50%);
+      border: 8px solid #f3f3f3;
+      border-top: 8px solid #007aff;
+      border-radius: 50%;
+      width: 60px;
+      height: 60px;
+      animation: spin 1s linear infinite;
+      z-index: 101;
+    }
+    @keyframes spin {
+      0% { transform: translate(-50%, -50%) rotate(0deg); }
+      100% { transform: translate(-50%, -50%) rotate(360deg); }
     }
     /* 隐藏 file input */
     #file-input {
       display: none;
     }
+    #reupload-btn {
+      display: none;
+      position: absolute;
+      top: 20px;
+      right: 20px;
+      padding: 10px 20px;
+      background-color: rgba(0, 122, 255, 0.8);
+      color: white;
+      border: none;
+      border-radius: 8px;
+      cursor: pointer;
+      font-size: 16px;
+      z-index: 102;
+      box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2);
+    }
+    #reupload-btn:hover {
+      background-color: rgba(0, 122, 255, 1);
+    }
   </style>
 </head>
 <body>
+  <div id="loader"></div>
   <div id="drop-zone">
     拖拽或点击上传6张图片
     (文件名包含 _r, _l, _u, _d, _f, _b 分别代表右、左、上、下、前、后)
     <input type="file" id="file-input" multiple accept="image/*">
   </div>
+  <button id="reupload-btn">重新上传</button>
 
   <!-- 引入 Three.js 和 OrbitControls -->
   <script src="./three.min.js"></script>
@@ -132,6 +182,12 @@
     // 拖拽区域和点击上传处理
     const dropZone = document.getElementById('drop-zone');
     const fileInput = document.getElementById('file-input');
+    const reuploadBtn = document.getElementById('reupload-btn');
+
+    reuploadBtn.addEventListener('click', function() {
+      dropZone.style.display = 'block';
+      reuploadBtn.style.display = 'none';
+    });
 
     // 点击上传：点击区域触发文件选择对话框
     dropZone.addEventListener('click', function() {
@@ -169,6 +225,9 @@
         alert('请确保选择6张图片！');
         return;
       }
+
+      document.getElementById('drop-zone').style.display = 'none';
+      document.getElementById('loader').style.display = 'block';
 
       // 映射规则：_r:右(0)、_l:左(1)、_u:上(2)、_d:下(3)、_f:前(4)、_b:后(5)
       const directionMapping = {
@@ -217,6 +276,9 @@
 
     // 创建全景立方体，将纹理映射到内侧
     function createPanoramaCube(textures) {
+      document.getElementById('loader').style.display = 'none';
+      document.getElementById('reupload-btn').style.display = 'block';
+
       const existingCube = scene.getObjectByName('panoramaCube');
       if (existingCube) {
         scene.remove(existingCube);
