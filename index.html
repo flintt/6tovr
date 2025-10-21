@@ -32,15 +32,15 @@
     (文件名包含 _r, _l, _u, _d, _f, _b 分别代表右、左、上、下、前、后)
     <input type="file" id="file-input" multiple accept="image/*">
   </div>
-  
+
   <!-- 引入 Three.js 和 OrbitControls -->
   <script src="./three.min.js"></script>
   <script src="./OrbitControls.js"></script>
-  
+
   <script>
     let scene, camera, renderer, controls;
     initScene();
-    
+
     function initScene() {
       scene = new THREE.Scene();
       camera = new THREE.PerspectiveCamera(75, window.innerWidth/window.innerHeight, 0.1, 1000);
@@ -52,7 +52,7 @@
       renderer.domElement.style.zIndex = '1';
       renderer.setClearColor(0xffffff);
       document.body.appendChild(renderer.domElement);
-      
+
       // 初始化 OrbitControls（关闭默认缩放，通过修改 fov 实现缩放）
       controls = new THREE.OrbitControls(camera, renderer.domElement);
       controls.enableZoom = false;
@@ -60,11 +60,11 @@
       camera.position.set(0.1, 0, 0);
       controls.target.set(0, 0, 0);
       controls.update();
-      
+
       controls.addEventListener('change', () => {
         renderer.render(scene, camera);
       });
-      
+
       // 监听鼠标滚轮，根据 fov 实现缩放，同时调整旋转速度
       const baseRotateSpeed = 1.0;
       const initialFov = 75;
@@ -77,13 +77,14 @@
         controls.update();
         renderer.render(scene, camera);
       });
-      
+
 		let initialPinchDistance = null;
 
 		// 触摸开始：如果至少有两个触摸点，使用前两个计算初始距离
 		renderer.domElement.addEventListener('touchstart', function(e) {
 		  if (e.touches.length >= 2) {
 			initialPinchDistance = getDistance(e.touches[0], e.touches[1]);
+			controls.enabled = false; // 禁用 OrbitControls
 		  }
 		}, { passive: false });
 
@@ -92,15 +93,15 @@
 		  if (e.touches.length >= 2 && initialPinchDistance !== null) {
 			const currentDistance = getDistance(e.touches[0], e.touches[1]);
 			const delta = currentDistance - initialPinchDistance;
-			
+
 			camera.fov -= delta * 0.05;
 			camera.fov = Math.max(10, Math.min(initialFov, camera.fov));
 			camera.updateProjectionMatrix();
-			
+
 			controls.rotateSpeed = baseRotateSpeed * (camera.fov / initialFov);
 			controls.update();
 			renderer.render(scene, camera);
-			
+
 			// 更新初始距离，保持连续计算
 			initialPinchDistance = currentDistance;
 			e.preventDefault();
@@ -111,10 +112,12 @@
 		renderer.domElement.addEventListener('touchend', function(e) {
 		  if (e.touches.length < 2) {
 			initialPinchDistance = null;
+			controls.enabled = true; // 启用 OrbitControls
 		  }
 		}, { passive: false });
 		renderer.domElement.addEventListener('touchcancel', function(e) {
 		  initialPinchDistance = null;
+		  controls.enabled = true; // 启用 OrbitControls
 		}, { passive: false });
 
 		// 辅助函数：计算两个触摸点之间的距离
@@ -125,21 +128,21 @@
 		}
       renderer.render(scene, camera);
     }
-    
+
     // 拖拽区域和点击上传处理
     const dropZone = document.getElementById('drop-zone');
     const fileInput = document.getElementById('file-input');
-    
+
     // 点击上传：点击区域触发文件选择对话框
     dropZone.addEventListener('click', function() {
       fileInput.click();
     });
-    
+
     // 文件选择后处理文件
     fileInput.addEventListener('change', function(event) {
       handleFiles(event.target.files);
     });
-    
+
     // 拖拽相关事件处理
     dropZone.addEventListener('dragenter', function(e) {
       e.preventDefault();
@@ -158,7 +161,7 @@
       dropZone.style.background = 'rgba(255,255,255,0.8)';
       handleFiles(e.dataTransfer.files);
     });
-    
+
     // 统一处理拖拽或点击上传的文件
     function handleFiles(fileList) {
       const files = Array.from(fileList);
@@ -166,7 +169,7 @@
         alert('请确保选择6张图片！');
         return;
       }
-      
+
       // 映射规则：_r:右(0)、_l:左(1)、_u:上(2)、_d:下(3)、_f:前(4)、_b:后(5)
       const directionMapping = {
         _r: 0,
@@ -176,10 +179,10 @@
         _f: 4,
         _b: 5
       };
-      
+
       const textures = new Array(6);
       let loadedCount = 0;
-      
+
       files.forEach(file => {
         const lowerName = file.name.toLowerCase();
         let assignedIndex = null;
@@ -211,17 +214,17 @@
         reader.readAsDataURL(file);
       });
     }
-    
+
     // 创建全景立方体，将纹理映射到内侧
     function createPanoramaCube(textures) {
       const existingCube = scene.getObjectByName('panoramaCube');
       if (existingCube) {
         scene.remove(existingCube);
       }
-      
+
       const geometry = new THREE.BoxGeometry(500, 500, 500);
       geometry.scale(-1, 1, 1);
-      
+
       const materials = [
         new THREE.MeshBasicMaterial({ map: textures[0] }), // 右
         new THREE.MeshBasicMaterial({ map: textures[1] }), // 左
@@ -230,12 +233,12 @@
         new THREE.MeshBasicMaterial({ map: textures[4] }), // 前
         new THREE.MeshBasicMaterial({ map: textures[5] })  // 后
       ];
-      
+
       const cube = new THREE.Mesh(geometry, materials);
       cube.name = 'panoramaCube';
       scene.add(cube);
     }
-    
+
     window.addEventListener('resize', function() {
       camera.aspect = window.innerWidth / window.innerHeight;
       camera.updateProjectionMatrix();
