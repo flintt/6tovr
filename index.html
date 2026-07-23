@@ -63,11 +63,11 @@
     #file-input {
       display: none;
     }
-    #reupload-btn {
+    #reupload-btn,
+    #adjust-btn {
       display: none;
       position: absolute;
       top: 20px;
-      right: 20px;
       padding: 10px 20px;
       background-color: rgba(0, 122, 255, 0.8);
       color: white;
@@ -78,7 +78,14 @@
       z-index: 102;
       box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2);
     }
-    #reupload-btn:hover {
+    #reupload-btn {
+      right: 20px;
+    }
+    #adjust-btn {
+      right: 140px;
+    }
+    #reupload-btn:hover,
+    #adjust-btn:hover {
       background-color: rgba(0, 122, 255, 1);
     }
     #assignment-panel {
@@ -208,15 +215,16 @@
     <p>拖拽或点击上传 6 张图片</p>
     <p class="hint">
       文件名中的 _r、_l、_u、_d、_f、_b 可用于自动识别；
-      文件名不可用时也可以通过缩略图手动指定方向。
+      文件名不可用时会自动匹配图片边缘，无法确定时再手动指定方向。
     </p>
     <input type="file" id="file-input" multiple accept="image/*">
   </div>
   <button id="reupload-btn">重新上传</button>
+  <button id="adjust-btn">手动调整</button>
   <div id="assignment-panel" role="dialog" aria-modal="true" aria-labelledby="assignment-title">
     <div class="assignment-dialog">
       <h2 id="assignment-title">指定每张图片的方向</h2>
-      <p>部分方向无法从文件名可靠识别。请查看缩略图，为每张图片选择一个不重复的方向。</p>
+      <p id="assignment-intro">请查看缩略图，为每张图片选择一个不重复的方向。</p>
       <div id="assignment-grid"></div>
       <p id="assignment-status" role="status"></p>
       <div class="assignment-actions">
@@ -329,9 +337,11 @@
     const dropZone = document.getElementById('drop-zone');
     const fileInput = document.getElementById('file-input');
     const reuploadBtn = document.getElementById('reupload-btn');
+    const adjustBtn = document.getElementById('adjust-btn');
     const loader = document.getElementById('loader');
     const assignmentPanel = document.getElementById('assignment-panel');
     const assignmentGrid = document.getElementById('assignment-grid');
+    const assignmentIntro = document.getElementById('assignment-intro');
     const assignmentStatus = document.getElementById('assignment-status');
     const confirmAssignmentBtn = document.getElementById('confirm-assignment-btn');
     const cancelAssignmentBtn = document.getElementById('cancel-assignment-btn');
@@ -346,12 +356,47 @@
       { index: 5, code: 'b', label: '后 (-Z)', aliases: ['b', 'back', 'rear', 'nz'] }
     ];
 
+    // 图片边缘与立方体材质槽之间的接缝关系。
+    // reverse 表示第二条边需要反向后再与第一条边比较。
+    const cubeSeams = [
+      [0, 'top',    2, 'right',  true],
+      [0, 'right',  5, 'left',   false],
+      [0, 'bottom', 3, 'right',  false],
+      [0, 'left',   4, 'right',  false],
+      [1, 'top',    2, 'left',   false],
+      [1, 'right',  4, 'left',   false],
+      [1, 'bottom', 3, 'left',   true],
+      [1, 'left',   5, 'right',  false],
+      [2, 'top',    5, 'top',    true],
+      [2, 'bottom', 4, 'top',    false],
+      [3, 'top',    4, 'bottom', false],
+      [3, 'bottom', 5, 'bottom', true]
+    ];
+    const edgeSampleSize = 96;
+    const edgeStripDepth = 3;
+
     let pendingFiles = [];
     let previewUrls = [];
+    let lastFiles = [];
+    let lastAssignments = [];
 
     reuploadBtn.addEventListener('click', function() {
       dropZone.style.display = 'block';
       reuploadBtn.style.display = 'none';
+      adjustBtn.style.display = 'none';
+    });
+
+    adjustBtn.addEventListener('click', function() {
+      if (lastFiles.length !== 6 || lastAssignments.length !== 6) {
+        return;
+      }
+      reuploadBtn.style.display = 'none';
+      adjustBtn.style.display = 'none';
+      openAssignmentPanel(
+        lastFiles,
+        lastAssignments,
+        '这是当前的排列结果。可以在这里手动修正任意方向。'
+      );
     });
 
     // 点击上传：点击区域触发文件选择对话框
@@ -390,13 +435,19 @@
       if (!assignments) {
         return;
       }
+      const sourceFiles = pendingFiles.slice();
       closeAssignmentPanel();
-      loadPanorama(assignments);
+      loadPanorama(assignments, sourceFiles);
     });
 
     cancelAssignmentBtn.addEventListener('click', function() {
       closeAssignmentPanel();
-      dropZone.style.display = 'block';
+      if (scene.getObjectByName('panoramaCube')) {
+        reuploadBtn.style.display = 'block';
+        adjustBtn.style.display = 'block';
+      } else {
+        dropZone.style.display = 'block';
+      }
     });
 
     fillByOrderBtn.addEventListener('click', function() {
@@ -407,7 +458,7 @@
     });
 
     // 统一处理拖拽或点击上传的文件。
-    function handleFiles(fileList) {
+    async function handleFiles(fileList) {
       const files = Array.from(fileList);
       if (files.length !== 6) {
         alert('请确保选择6张图片！');
@@ -417,10 +468,43 @@
       dropZone.style.display = 'none';
       const automaticAssignments = getAutomaticAssignments(files);
       if (automaticAssignments.filter(Boolean).length === 6) {
-        loadPanorama(automaticAssignments);
-      } else {
-        openAssignmentPanel(files, automaticAssignments);
+        loadPanorama(automaticAssignments, files);
+        return;
       }
+
+      const completedAssignments = completeSingleMissingDirection(files, automaticAssignments);
+      if (completedAssignments) {
+        loadPanorama(completedAssignments, files);
+        return;
+      }
+
+      loader.style.display = 'block';
+      let edgeMatch = null;
+      try {
+        edgeMatch = await inferAssignmentsFromEdges(files, automaticAssignments);
+      } catch (error) {
+        console.warn('无法分析图片边缘，将使用手动分配：', error);
+      } finally {
+        loader.style.display = 'none';
+      }
+
+      if (edgeMatch && edgeMatch.confident) {
+        console.info('图片边缘自动匹配成功：', {
+          averageSeamError: edgeMatch.averageError,
+          confidenceGap: edgeMatch.confidenceGap,
+          searchedNodes: edgeMatch.searchedNodes
+        });
+        loadPanorama(edgeMatch.assignments, files);
+        return;
+      }
+
+      openAssignmentPanel(
+        files,
+        automaticAssignments,
+        edgeMatch
+          ? '已尝试按图片边缘自动拼接，但结果不够明确。请手动确认六个方向。'
+          : '无法可靠读取图片边缘。请手动确认六个方向。'
+      );
     }
 
     // 只在分隔符之间识别方向，避免把普通文件名中的单个字母误判为方向。
@@ -455,9 +539,374 @@
       return assignments;
     }
 
-    function openAssignmentPanel(files, automaticAssignments) {
+    function completeSingleMissingDirection(files, automaticAssignments) {
+      const assignedFiles = automaticAssignments.filter(Boolean);
+      if (assignedFiles.length !== 5) {
+        return null;
+      }
+      const remainingFile = files.find(file => !assignedFiles.includes(file));
+      const missingDirection = directions.find(
+        direction => !automaticAssignments[direction.index]
+      );
+      if (!remainingFile || !missingDirection) {
+        return null;
+      }
+      const completed = automaticAssignments.slice();
+      completed[missingDirection.index] = remainingFile;
+      return completed;
+    }
+
+    async function inferAssignmentsFromEdges(files, knownAssignments) {
+      const edgeFeatures = await Promise.all(files.map(extractEdgeFeatures));
+      const fixedImageByFace = new Array(6).fill(-1);
+      knownAssignments.forEach((file, faceIndex) => {
+        if (file) {
+          fixedImageByFace[faceIndex] = files.indexOf(file);
+        }
+      });
+
+      const searchResult = searchCubeAssignments(edgeFeatures, fixedImageByFace);
+      if (!searchResult.best) {
+        return null;
+      }
+
+      const averageError = searchResult.best.cost / cubeSeams.length;
+      const secondAverageError = searchResult.second
+        ? searchResult.second.cost / cubeSeams.length
+        : Infinity;
+      const absoluteGap = secondAverageError - averageError;
+      const relativeGap = absoluteGap / Math.max(averageError, 0.02);
+
+      // 接缝本身必须足够接近，并且最佳方案要明显优于第二名。
+      // 阈值宁可触发手动 fallback，也不自动展示一个错误全景。
+      const confident = averageError < 0.16 && (
+        !searchResult.second ||
+        (absoluteGap > 0.008 && relativeGap > 0.08)
+      );
+
+      return {
+        assignments: searchResult.best.placement.map(imageIndex => files[imageIndex]),
+        confident,
+        averageError,
+        confidenceGap: relativeGap,
+        searchedNodes: searchResult.searchedNodes
+      };
+    }
+
+    async function extractEdgeFeatures(file) {
+      const image = await loadImageFile(file);
+      const canvas = document.createElement('canvas');
+      canvas.width = edgeSampleSize;
+      canvas.height = edgeSampleSize;
+      const context = canvas.getContext('2d', { willReadFrequently: true });
+      context.drawImage(image, 0, 0, edgeSampleSize, edgeSampleSize);
+      const pixels = context.getImageData(
+        0,
+        0,
+        edgeSampleSize,
+        edgeSampleSize
+      ).data;
+
+      const edgeLength = edgeSampleSize * edgeStripDepth * 3;
+      const edges = {
+        top: new Float32Array(edgeLength),
+        right: new Float32Array(edgeLength),
+        bottom: new Float32Array(edgeLength),
+        left: new Float32Array(edgeLength)
+      };
+
+      function copyPixel(edge, sampleIndex, depth, x, y) {
+        const sourceOffset = (y * edgeSampleSize + x) * 4;
+        const targetOffset = (sampleIndex * edgeStripDepth + depth) * 3;
+        edge[targetOffset] = pixels[sourceOffset] / 255;
+        edge[targetOffset + 1] = pixels[sourceOffset + 1] / 255;
+        edge[targetOffset + 2] = pixels[sourceOffset + 2] / 255;
+      }
+
+      for (let sampleIndex = 0; sampleIndex < edgeSampleSize; sampleIndex++) {
+        for (let depth = 0; depth < edgeStripDepth; depth++) {
+          copyPixel(edges.top, sampleIndex, depth, sampleIndex, depth);
+          copyPixel(
+            edges.right,
+            sampleIndex,
+            depth,
+            edgeSampleSize - 1 - depth,
+            sampleIndex
+          );
+          copyPixel(
+            edges.bottom,
+            sampleIndex,
+            depth,
+            sampleIndex,
+            edgeSampleSize - 1 - depth
+          );
+          copyPixel(edges.left, sampleIndex, depth, depth, sampleIndex);
+        }
+      }
+
+      return edges;
+    }
+
+    function compareEdges(firstEdge, secondEdge, reverse) {
+      const sampleStride = edgeStripDepth * 3;
+      let colorError = 0;
+      let gradientError = 0;
+      let colorCount = 0;
+      let gradientCount = 0;
+
+      for (let sampleIndex = 0; sampleIndex < edgeSampleSize; sampleIndex++) {
+        const secondSampleIndex = reverse
+          ? edgeSampleSize - 1 - sampleIndex
+          : sampleIndex;
+
+        for (let depth = 0; depth < edgeStripDepth; depth++) {
+          for (let channel = 0; channel < 3; channel++) {
+            const firstOffset = sampleIndex * sampleStride + depth * 3 + channel;
+            const secondOffset =
+              secondSampleIndex * sampleStride + depth * 3 + channel;
+            const colorDelta = firstEdge[firstOffset] - secondEdge[secondOffset];
+            colorError += colorDelta * colorDelta;
+            colorCount++;
+
+            if (sampleIndex > 0) {
+              const previousSecondSampleIndex = reverse
+                ? edgeSampleSize - sampleIndex
+                : sampleIndex - 1;
+              const previousFirstOffset = firstOffset - sampleStride;
+              const previousSecondOffset =
+                previousSecondSampleIndex * sampleStride + depth * 3 + channel;
+              const firstGradient =
+                firstEdge[firstOffset] - firstEdge[previousFirstOffset];
+              const secondGradient =
+                secondEdge[secondOffset] - secondEdge[previousSecondOffset];
+              const gradientDelta = firstGradient - secondGradient;
+              gradientError += gradientDelta * gradientDelta;
+              gradientCount++;
+            }
+          }
+        }
+      }
+
+      const colorScore = Math.sqrt(colorError / colorCount);
+      const gradientScore = Math.sqrt(gradientError / gradientCount);
+      return colorScore * 0.72 + gradientScore * 0.28;
+    }
+
+    // 增量放置立方体面：每放入一张图，就只从剩余图片中选择下一面。
+    // 使用乐观下界剪枝，避免某一条相似的天空/墙面边导致贪心误配。
+    function searchCubeAssignments(edgeFeatures, fixedImageByFace) {
+      const placement = new Array(6).fill(-1);
+      const usedImages = new Set();
+      const scoreCache = new Map();
+      const bestResults = [];
+      let searchedNodes = 0;
+
+      for (let faceIndex = 0; faceIndex < fixedImageByFace.length; faceIndex++) {
+        const imageIndex = fixedImageByFace[faceIndex];
+        if (imageIndex < 0) {
+          continue;
+        }
+        if (usedImages.has(imageIndex)) {
+          return { best: null, second: null, searchedNodes };
+        }
+        placement[faceIndex] = imageIndex;
+        usedImages.add(imageIndex);
+      }
+
+      function getSeamCost(seam, firstImageIndex, secondImageIndex) {
+        const [, firstEdgeName, , secondEdgeName, reverse] = seam;
+        const cacheKey = [
+          firstImageIndex,
+          firstEdgeName,
+          secondImageIndex,
+          secondEdgeName,
+          reverse ? 1 : 0
+        ].join(':');
+        if (!scoreCache.has(cacheKey)) {
+          scoreCache.set(
+            cacheKey,
+            compareEdges(
+              edgeFeatures[firstImageIndex][firstEdgeName],
+              edgeFeatures[secondImageIndex][secondEdgeName],
+              reverse
+            )
+          );
+        }
+        return scoreCache.get(cacheKey);
+      }
+
+      function resolvedCost() {
+        let cost = 0;
+        cubeSeams.forEach(seam => {
+          const [firstFace, , secondFace] = seam;
+          const firstImage = placement[firstFace];
+          const secondImage = placement[secondFace];
+          if (firstImage >= 0 && secondImage >= 0) {
+            cost += getSeamCost(seam, firstImage, secondImage);
+          }
+        });
+        return cost;
+      }
+
+      // 对尚未闭合的每条接缝取独立最小值，作为安全的乐观下界。
+      function optimisticCost() {
+        let cost = 0;
+        const unusedImages = directions
+          .map(direction => direction.index)
+          .filter(imageIndex => !usedImages.has(imageIndex));
+
+        for (const seam of cubeSeams) {
+          const [firstFace, , secondFace] = seam;
+          const firstImage = placement[firstFace];
+          const secondImage = placement[secondFace];
+
+          if (firstImage >= 0 && secondImage >= 0) {
+            cost += getSeamCost(seam, firstImage, secondImage);
+            continue;
+          }
+
+          let minimum = Infinity;
+          if (firstImage >= 0) {
+            unusedImages.forEach(candidateImage => {
+              minimum = Math.min(
+                minimum,
+                getSeamCost(seam, firstImage, candidateImage)
+              );
+            });
+          } else if (secondImage >= 0) {
+            unusedImages.forEach(candidateImage => {
+              minimum = Math.min(
+                minimum,
+                getSeamCost(seam, candidateImage, secondImage)
+              );
+            });
+          } else {
+            unusedImages.forEach(firstCandidate => {
+              unusedImages.forEach(secondCandidate => {
+                if (firstCandidate !== secondCandidate) {
+                  minimum = Math.min(
+                    minimum,
+                    getSeamCost(seam, firstCandidate, secondCandidate)
+                  );
+                }
+              });
+            });
+          }
+          cost += minimum;
+        }
+        return cost;
+      }
+
+      function incrementalCost(faceIndex, imageIndex) {
+        let cost = 0;
+        cubeSeams.forEach(seam => {
+          const [firstFace, , secondFace] = seam;
+          if (firstFace === faceIndex && placement[secondFace] >= 0) {
+            cost += getSeamCost(seam, imageIndex, placement[secondFace]);
+          } else if (secondFace === faceIndex && placement[firstFace] >= 0) {
+            cost += getSeamCost(seam, placement[firstFace], imageIndex);
+          }
+        });
+        return cost;
+      }
+
+      // 优先填充已拥有最多相邻面的槽；并用最佳/次佳差值选择
+      // 区分度最高的一面，让候选集合尽快缩小。
+      function chooseNextFace() {
+        const unusedImages = directions
+          .map(direction => direction.index)
+          .filter(imageIndex => !usedImages.has(imageIndex));
+        let choice = null;
+
+        directions.forEach(direction => {
+          const faceIndex = direction.index;
+          if (placement[faceIndex] >= 0) {
+            return;
+          }
+          const neighborCount = cubeSeams.filter(seam => {
+            const [firstFace, , secondFace] = seam;
+            return (
+              firstFace === faceIndex && placement[secondFace] >= 0
+            ) || (
+              secondFace === faceIndex && placement[firstFace] >= 0
+            );
+          }).length;
+          const candidates = unusedImages
+            .map(imageIndex => ({
+              imageIndex,
+              cost: incrementalCost(faceIndex, imageIndex)
+            }))
+            .sort((first, second) => first.cost - second.cost);
+          const distinction = candidates.length > 1
+            ? candidates[1].cost - candidates[0].cost
+            : Infinity;
+
+          if (
+            !choice ||
+            neighborCount > choice.neighborCount ||
+            (
+              neighborCount === choice.neighborCount &&
+              distinction > choice.distinction
+            )
+          ) {
+            choice = { faceIndex, neighborCount, distinction, candidates };
+          }
+        });
+        return choice;
+      }
+
+      function rememberResult(cost) {
+        bestResults.push({ placement: placement.slice(), cost });
+        bestResults.sort((first, second) => first.cost - second.cost);
+        if (bestResults.length > 2) {
+          bestResults.pop();
+        }
+      }
+
+      function search() {
+        searchedNodes++;
+        if (usedImages.size === 6) {
+          rememberResult(resolvedCost());
+          return;
+        }
+
+        const choice = chooseNextFace();
+        if (!choice) {
+          return;
+        }
+
+        for (const candidate of choice.candidates) {
+          placement[choice.faceIndex] = candidate.imageIndex;
+          usedImages.add(candidate.imageIndex);
+
+          const secondBestCost = bestResults.length === 2
+            ? bestResults[1].cost
+            : Infinity;
+          if (optimisticCost() <= secondBestCost) {
+            search();
+          }
+
+          usedImages.delete(candidate.imageIndex);
+          placement[choice.faceIndex] = -1;
+        }
+      }
+
+      search();
+      return {
+        best: bestResults[0] || null,
+        second: bestResults[1] || null,
+        searchedNodes
+      };
+    }
+
+    function openAssignmentPanel(
+      files,
+      automaticAssignments,
+      intro = '部分方向无法从文件名可靠识别。请手动确认六个方向。'
+    ) {
       closeAssignmentPanel();
       pendingFiles = files;
+      assignmentIntro.textContent = intro;
       assignmentGrid.replaceChildren();
 
       const automaticDirectionByFile = new Map();
@@ -547,9 +996,10 @@
         : null;
     }
 
-    async function loadPanorama(assignments) {
+    async function loadPanorama(assignments, sourceFiles = assignments) {
       loader.style.display = 'block';
       reuploadBtn.style.display = 'none';
+      adjustBtn.style.display = 'none';
       try {
         const results = await Promise.allSettled(assignments.map(loadTexture));
         const failedResult = results.find(result => result.status === 'rejected');
@@ -563,6 +1013,10 @@
         }
         const textures = results.map(result => result.value);
         createPanoramaCube(textures);
+        lastFiles = sourceFiles.slice();
+        lastAssignments = assignments.slice();
+        reuploadBtn.style.display = 'block';
+        adjustBtn.style.display = 'block';
         renderer.render(scene, camera);
       } catch (error) {
         console.error('读取图片失败：', error);
@@ -573,15 +1027,13 @@
       }
     }
 
-    function loadTexture(file) {
+    function loadImageFile(file) {
       return new Promise((resolve, reject) => {
         const image = new Image();
         const objectUrl = URL.createObjectURL(file);
         image.onload = function() {
           URL.revokeObjectURL(objectUrl);
-          const texture = new THREE.Texture(image);
-          texture.needsUpdate = true;
-          resolve(texture);
+          resolve(image);
         };
         image.onerror = function() {
           URL.revokeObjectURL(objectUrl);
@@ -591,10 +1043,16 @@
       });
     }
 
+    function loadTexture(file) {
+      return loadImageFile(file).then(image => {
+        const texture = new THREE.Texture(image);
+        texture.needsUpdate = true;
+        return texture;
+      });
+    }
+
     // 创建全景立方体，将纹理映射到内侧
     function createPanoramaCube(textures) {
-      reuploadBtn.style.display = 'block';
-
       const existingCube = scene.getObjectByName('panoramaCube');
       if (existingCube) {
         scene.remove(existingCube);
