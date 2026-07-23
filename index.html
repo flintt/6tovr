@@ -28,6 +28,15 @@
       cursor: pointer;
       transition: background-color 0.2s ease, transform 0.2s ease;
     }
+    #drop-zone p {
+      margin: 0;
+    }
+    #drop-zone .hint {
+      margin-top: 10px;
+      font-size: 14px;
+      line-height: 1.5;
+      color: #666;
+    }
     #drop-zone:hover {
       background: rgba(248, 248, 252, 0.95);
       transform: translate(-50%, -50%) scale(1.02);
@@ -72,16 +81,153 @@
     #reupload-btn:hover {
       background-color: rgba(0, 122, 255, 1);
     }
+    #assignment-panel {
+      display: none;
+      position: absolute;
+      inset: 0;
+      z-index: 103;
+      overflow: auto;
+      padding: 24px;
+      box-sizing: border-box;
+      background: rgba(0, 0, 0, 0.55);
+    }
+    .assignment-dialog {
+      width: min(900px, 100%);
+      margin: 0 auto;
+      padding: 24px;
+      box-sizing: border-box;
+      border-radius: 16px;
+      background: #fff;
+      box-shadow: 0 12px 36px rgba(0, 0, 0, 0.25);
+    }
+    .assignment-dialog h2 {
+      margin: 0 0 8px;
+      font-size: 22px;
+    }
+    .assignment-dialog > p {
+      margin: 0;
+      color: #666;
+      line-height: 1.5;
+    }
+    #assignment-grid {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 16px;
+      margin-top: 20px;
+    }
+    .assignment-card {
+      min-width: 0;
+      padding: 10px;
+      border: 1px solid #ddd;
+      border-radius: 12px;
+      background: #fafafa;
+    }
+    .assignment-card img {
+      display: block;
+      width: 100%;
+      aspect-ratio: 1;
+      border-radius: 8px;
+      background: #eee;
+      object-fit: cover;
+    }
+    .assignment-card .file-name {
+      overflow: hidden;
+      margin: 8px 0;
+      color: #555;
+      font-size: 12px;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    .assignment-card select {
+      width: 100%;
+      padding: 9px 8px;
+      border: 1px solid #bbb;
+      border-radius: 8px;
+      background: #fff;
+      font-size: 15px;
+    }
+    .assignment-actions {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      margin-top: 20px;
+    }
+    .assignment-actions button {
+      padding: 10px 16px;
+      border: 0;
+      border-radius: 8px;
+      cursor: pointer;
+      font-size: 15px;
+    }
+    #fill-by-order-btn {
+      background: #e9e9ee;
+      color: #222;
+    }
+    #cancel-assignment-btn {
+      margin-left: auto;
+      background: transparent;
+      color: #555;
+    }
+    #confirm-assignment-btn {
+      background: #007aff;
+      color: #fff;
+    }
+    #confirm-assignment-btn:disabled {
+      cursor: not-allowed;
+      opacity: 0.45;
+    }
+    #assignment-status {
+      min-height: 1.5em;
+      margin: 12px 0 0;
+      color: #c2410c;
+      font-size: 14px;
+    }
+    @media (max-width: 680px) {
+      #assignment-panel {
+        padding: 12px;
+      }
+      .assignment-dialog {
+        padding: 18px;
+      }
+      #assignment-grid {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 10px;
+      }
+      .assignment-actions {
+        flex-wrap: wrap;
+      }
+      #cancel-assignment-btn {
+        margin-left: 0;
+      }
+    }
   </style>
 </head>
 <body>
   <div id="loader"></div>
   <div id="drop-zone">
-    拖拽或点击上传6张图片
-    (文件名包含 _r, _l, _u, _d, _f, _b 分别代表右、左、上、下、前、后)
+    <p>拖拽或点击上传 6 张图片</p>
+    <p class="hint">
+      文件名中的 _r、_l、_u、_d、_f、_b 可用于自动识别；
+      文件名不可用时也可以通过缩略图手动指定方向。
+    </p>
     <input type="file" id="file-input" multiple accept="image/*">
   </div>
   <button id="reupload-btn">重新上传</button>
+  <div id="assignment-panel" role="dialog" aria-modal="true" aria-labelledby="assignment-title">
+    <div class="assignment-dialog">
+      <h2 id="assignment-title">指定每张图片的方向</h2>
+      <p>部分方向无法从文件名可靠识别。请查看缩略图，为每张图片选择一个不重复的方向。</p>
+      <div id="assignment-grid"></div>
+      <p id="assignment-status" role="status"></p>
+      <div class="assignment-actions">
+        <button id="fill-by-order-btn" type="button" title="依次指定为右、左、上、下、前、后">
+          按选择顺序填充
+        </button>
+        <button id="cancel-assignment-btn" type="button">取消</button>
+        <button id="confirm-assignment-btn" type="button" disabled>生成全景</button>
+      </div>
+    </div>
+  </div>
 
   <!-- 引入 Three.js 和 OrbitControls -->
   <script src="./three.min.js"></script>
@@ -183,6 +329,25 @@
     const dropZone = document.getElementById('drop-zone');
     const fileInput = document.getElementById('file-input');
     const reuploadBtn = document.getElementById('reupload-btn');
+    const loader = document.getElementById('loader');
+    const assignmentPanel = document.getElementById('assignment-panel');
+    const assignmentGrid = document.getElementById('assignment-grid');
+    const assignmentStatus = document.getElementById('assignment-status');
+    const confirmAssignmentBtn = document.getElementById('confirm-assignment-btn');
+    const cancelAssignmentBtn = document.getElementById('cancel-assignment-btn');
+    const fillByOrderBtn = document.getElementById('fill-by-order-btn');
+
+    const directions = [
+      { index: 0, code: 'r', label: '右 (+X)', aliases: ['r', 'right', 'px'] },
+      { index: 1, code: 'l', label: '左 (-X)', aliases: ['l', 'left', 'nx'] },
+      { index: 2, code: 'u', label: '上 (+Y)', aliases: ['u', 'up', 'top', 'py'] },
+      { index: 3, code: 'd', label: '下 (-Y)', aliases: ['d', 'down', 'bottom', 'ny'] },
+      { index: 4, code: 'f', label: '前 (+Z)', aliases: ['f', 'front', 'pz'] },
+      { index: 5, code: 'b', label: '后 (-Z)', aliases: ['b', 'back', 'rear', 'nz'] }
+    ];
+
+    let pendingFiles = [];
+    let previewUrls = [];
 
     reuploadBtn.addEventListener('click', function() {
       dropZone.style.display = 'block';
@@ -191,6 +356,8 @@
 
     // 点击上传：点击区域触发文件选择对话框
     dropZone.addEventListener('click', function() {
+      // 允许连续两次选择同一组文件。
+      fileInput.value = '';
       fileInput.click();
     });
 
@@ -218,7 +385,28 @@
       handleFiles(e.dataTransfer.files);
     });
 
-    // 统一处理拖拽或点击上传的文件
+    confirmAssignmentBtn.addEventListener('click', function() {
+      const assignments = readManualAssignments();
+      if (!assignments) {
+        return;
+      }
+      closeAssignmentPanel();
+      loadPanorama(assignments);
+    });
+
+    cancelAssignmentBtn.addEventListener('click', function() {
+      closeAssignmentPanel();
+      dropZone.style.display = 'block';
+    });
+
+    fillByOrderBtn.addEventListener('click', function() {
+      assignmentGrid.querySelectorAll('select').forEach((select, fileIndex) => {
+        select.value = String(fileIndex);
+      });
+      validateManualAssignments();
+    });
+
+    // 统一处理拖拽或点击上传的文件。
     function handleFiles(fileList) {
       const files = Array.from(fileList);
       if (files.length !== 6) {
@@ -226,62 +414,195 @@
         return;
       }
 
-      document.getElementById('drop-zone').style.display = 'none';
-      document.getElementById('loader').style.display = 'block';
+      dropZone.style.display = 'none';
+      const automaticAssignments = getAutomaticAssignments(files);
+      if (automaticAssignments.filter(Boolean).length === 6) {
+        loadPanorama(automaticAssignments);
+      } else {
+        openAssignmentPanel(files, automaticAssignments);
+      }
+    }
 
-      // 映射规则：_r:右(0)、_l:左(1)、_u:上(2)、_d:下(3)、_f:前(4)、_b:后(5)
-      const directionMapping = {
-        _r: 0,
-        _l: 1,
-        _u: 2,
-        _d: 3,
-        _f: 4,
-        _b: 5
-      };
+    // 只在分隔符之间识别方向，避免把普通文件名中的单个字母误判为方向。
+    function detectDirection(fileName) {
+      const stem = (fileName || '').toLowerCase().replace(/\.[^.]+$/, '');
+      const tokens = stem.split(/[^a-z0-9]+/).filter(Boolean);
+      const matches = directions.filter(direction =>
+        direction.aliases.some(alias => tokens.includes(alias))
+      );
+      return matches.length === 1 ? matches[0].index : null;
+    }
 
-      const textures = new Array(6);
-      let loadedCount = 0;
-
-      files.forEach(file => {
-        const lowerName = file.name.toLowerCase();
-        let assignedIndex = null;
-        for (const key in directionMapping) {
-          if (lowerName.indexOf(key) !== -1) {
-            assignedIndex = directionMapping[key];
-            break;
-          }
-        }
-        if (assignedIndex === null) {
-          console.warn('无法判断方向，文件名不包含预期字符：', file.name);
+    // 重复命中同一方向时不擅自取第一张，把冲突留给用户确认。
+    function getAutomaticAssignments(files) {
+      const matchesByDirection = new Map();
+      files.forEach((file, fileIndex) => {
+        const directionIndex = detectDirection(file.name);
+        if (directionIndex === null) {
           return;
         }
-        const reader = new FileReader();
-        reader.onload = function(event) {
-          const img = new Image();
-          img.onload = function() {
-            const texture = new THREE.Texture(img);
-            texture.needsUpdate = true;
-            textures[assignedIndex] = texture;
-            loadedCount++;
-            if (loadedCount === 6) {
-              createPanoramaCube(textures);
-              renderer.render(scene, camera);
+        const matches = matchesByDirection.get(directionIndex) || [];
+        matches.push(fileIndex);
+        matchesByDirection.set(directionIndex, matches);
+      });
+
+      const assignments = new Array(6);
+      matchesByDirection.forEach((fileIndexes, directionIndex) => {
+        if (fileIndexes.length === 1) {
+          assignments[directionIndex] = files[fileIndexes[0]];
+        }
+      });
+      return assignments;
+    }
+
+    function openAssignmentPanel(files, automaticAssignments) {
+      closeAssignmentPanel();
+      pendingFiles = files;
+      assignmentGrid.replaceChildren();
+
+      const automaticDirectionByFile = new Map();
+      automaticAssignments.forEach((file, directionIndex) => {
+        if (file) {
+          automaticDirectionByFile.set(file, directionIndex);
+        }
+      });
+
+      files.forEach((file, fileIndex) => {
+        const card = document.createElement('div');
+        card.className = 'assignment-card';
+
+        const image = document.createElement('img');
+        const previewUrl = URL.createObjectURL(file);
+        previewUrls.push(previewUrl);
+        image.src = previewUrl;
+        image.alt = `第 ${fileIndex + 1} 张图片预览`;
+
+        const fileName = document.createElement('p');
+        fileName.className = 'file-name';
+        fileName.textContent = file.name || `图片 ${fileIndex + 1}`;
+        fileName.title = file.name || '';
+
+        const select = document.createElement('select');
+        select.dataset.fileIndex = String(fileIndex);
+        select.setAttribute('aria-label', `为第 ${fileIndex + 1} 张图片选择方向`);
+        select.appendChild(new Option('请选择方向', ''));
+        directions.forEach(direction => {
+          select.appendChild(new Option(direction.label, String(direction.index)));
+        });
+        if (automaticDirectionByFile.has(file)) {
+          select.value = String(automaticDirectionByFile.get(file));
+        }
+        select.addEventListener('change', validateManualAssignments);
+
+        card.append(image, fileName, select);
+        assignmentGrid.appendChild(card);
+      });
+
+      assignmentPanel.style.display = 'block';
+      validateManualAssignments();
+    }
+
+    function closeAssignmentPanel() {
+      assignmentPanel.style.display = 'none';
+      assignmentGrid.replaceChildren();
+      previewUrls.forEach(url => URL.revokeObjectURL(url));
+      previewUrls = [];
+      pendingFiles = [];
+      assignmentStatus.textContent = '';
+      confirmAssignmentBtn.disabled = true;
+    }
+
+    function getSelectedDirections() {
+      return Array.from(assignmentGrid.querySelectorAll('select'), select => select.value);
+    }
+
+    function validateManualAssignments() {
+      const selected = getSelectedDirections();
+      const assigned = selected.filter(value => value !== '');
+      const unique = new Set(assigned);
+      const missingCount = 6 - assigned.length;
+      const duplicateCount = assigned.length - unique.size;
+
+      confirmAssignmentBtn.disabled = missingCount !== 0 || duplicateCount !== 0;
+      if (duplicateCount > 0) {
+        assignmentStatus.textContent = '每个方向只能指定一张图片，请处理重复方向。';
+      } else if (missingCount > 0) {
+        assignmentStatus.textContent = `还需要指定 ${missingCount} 张图片的方向。`;
+      } else {
+        assignmentStatus.textContent = '六个方向均已指定，可以生成全景。';
+      }
+    }
+
+    function readManualAssignments() {
+      const selected = getSelectedDirections();
+      if (selected.length !== 6 || selected.some(value => value === '')) {
+        return null;
+      }
+      const assignments = new Array(6);
+      selected.forEach((directionIndex, fileIndex) => {
+        assignments[Number(directionIndex)] = pendingFiles[fileIndex];
+      });
+      return directions.every(direction => Boolean(assignments[direction.index]))
+        ? assignments
+        : null;
+    }
+
+    async function loadPanorama(assignments) {
+      loader.style.display = 'block';
+      reuploadBtn.style.display = 'none';
+      try {
+        const results = await Promise.allSettled(assignments.map(loadTexture));
+        const failedResult = results.find(result => result.status === 'rejected');
+        if (failedResult) {
+          results.forEach(result => {
+            if (result.status === 'fulfilled') {
+              result.value.dispose();
             }
-          };
-          img.src = event.target.result;
+          });
+          throw failedResult.reason;
+        }
+        const textures = results.map(result => result.value);
+        createPanoramaCube(textures);
+        renderer.render(scene, camera);
+      } catch (error) {
+        console.error('读取图片失败：', error);
+        alert('有图片无法读取，请重新选择有效的图片文件。');
+        dropZone.style.display = 'block';
+      } finally {
+        loader.style.display = 'none';
+      }
+    }
+
+    function loadTexture(file) {
+      return new Promise((resolve, reject) => {
+        const image = new Image();
+        const objectUrl = URL.createObjectURL(file);
+        image.onload = function() {
+          URL.revokeObjectURL(objectUrl);
+          const texture = new THREE.Texture(image);
+          texture.needsUpdate = true;
+          resolve(texture);
         };
-        reader.readAsDataURL(file);
+        image.onerror = function() {
+          URL.revokeObjectURL(objectUrl);
+          reject(new Error(`无法读取图片：${file.name || '未命名图片'}`));
+        };
+        image.src = objectUrl;
       });
     }
 
     // 创建全景立方体，将纹理映射到内侧
     function createPanoramaCube(textures) {
-      document.getElementById('loader').style.display = 'none';
-      document.getElementById('reupload-btn').style.display = 'block';
+      reuploadBtn.style.display = 'block';
 
       const existingCube = scene.getObjectByName('panoramaCube');
       if (existingCube) {
         scene.remove(existingCube);
+        existingCube.geometry.dispose();
+        existingCube.material.forEach(material => {
+          material.map.dispose();
+          material.dispose();
+        });
       }
 
       const geometry = new THREE.BoxGeometry(500, 500, 500);
